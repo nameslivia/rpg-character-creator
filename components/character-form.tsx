@@ -2,7 +2,7 @@
 
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Character, characterSchema, races, professions } from "@/lib/types";
+import { Character, characterSchema, races, professions, attributeNames } from "@/lib/types";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,11 @@ export function CharacterForm() {
             },
         },
     });
+
+    const attributes = form.watch("attributes");
+    const totalPoints = Object.values(attributes).reduce((sum, val) => sum + val, 0);
+    const maxPoints = 90;
+    const remainingPoints = maxPoints - totalPoints;
 
     const onSubmit = (data: Character) => {
         console.log("角色資料: ",data);
@@ -104,6 +109,58 @@ export function CharacterForm() {
                         />
                         <FieldError>{form.formState.errors.profession?.message}</FieldError>
                     </Field>
+                </CardContent>
+            </Card>
+            
+            {/* attributes */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                        <span>Attributes</span>
+                        <span className="text-sm font-normal">
+                            Remaining Points: 
+                            <span
+                                className={`ml-2 font-bold ${
+                                    remainingPoints < 0 ? "text-red-500" : "text-green-500"
+                                }`}
+                            >
+                                {remainingPoints}
+                            </span>
+                        </span>
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {/* Attribute inputs (3x2 grid) */}
+                    <div className="grid grid-cols-3 gap-4">
+                        {(Object.keys(attributeNames) as Array<keyof typeof attributes>).map(
+                            (attr) => (
+                                <Field key={attr}>
+                                    <FieldLabel htmlFor={attr}>
+                                        {attributeNames[attr]}
+                                    </FieldLabel>
+                                    <Controller
+                                        name={`attributes.${attr}`}
+                                        control={form.control}
+                                        render={({ field }) => (
+                                            <Input
+                                                id={attr}
+                                                type="number"
+                                                min={1}
+                                                max={100}
+                                                {...field}
+                                                onChange={(e) => 
+                                                    field.onChange(parseInt(e.target.value) || 1)
+                                                }
+                                            />
+                                        )}
+                                    />
+                                    <FieldError>
+                                        {form.formState.errors.attributes?.[attr]?.message}
+                                    </FieldError>
+                                </Field>
+                            )
+                        )}
+                    </div>
                 </CardContent>
             </Card>
 

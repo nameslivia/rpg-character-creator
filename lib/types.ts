@@ -6,6 +6,16 @@ export const races = ["Human", "Elf", "Dwarf", "Orc"] as const;
 // 定義職業選項
 export const professions = ["Warrior", "Mage", "Rogue", "Healer"] as const;
 
+// 定義屬性選項
+export const attributeNames = {
+    strength: "Strength",
+    dexterity: "Dexterity",
+    constitution: "Constitution",
+    intelligence: "Intelligence",
+    wisdom: "Wisdom",
+    charisma: "Charisma",
+}
+
 // 定義角色資料結構和驗證規則
 export const characterSchema = z.object({
     // 角色名稱
