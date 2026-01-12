@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectTrigger, SelectValue, SelectItem } from "@/components/ui/select";
 import { Field, FieldLabel, FieldError } from "@/components/ui/field";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { AlbumUploader } from "@/components/album-uploader";
 
 export function CharacterForm() {
     // 初始化表單
@@ -26,6 +27,7 @@ export function CharacterForm() {
                 wisdom: 10,
                 charisma: 10,
             },
+            album: [],
         },
     });
 
@@ -163,6 +165,18 @@ export function CharacterForm() {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* character progress album */}
+            <Controller
+                name="album"
+                control={form.control}
+                render={({ field }) => (
+                    <AlbumUploader
+                        photos={field.value || []}
+                        onChange={field.onChange}
+                    />
+                )}
+            />
 
             <Button type="submit" className="w-full">Create Character</Button>
         </form>

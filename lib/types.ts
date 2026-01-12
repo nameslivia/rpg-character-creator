@@ -16,6 +16,16 @@ export const attributeNames = {
     charisma: "Charisma",
 }
 
+// 定義相簿照片資料結構
+export const albumPhotoSchema = z.object({
+    id: z.string(),
+    url: z.string(),
+    fileName: z.string(),
+    fileSize: z.number(),
+    fileType: z.string(),
+    uploadedAt: z.date(),
+});
+
 // 定義角色資料結構和驗證規則
 export const characterSchema = z.object({
     // 角色名稱
@@ -43,7 +53,11 @@ export const characterSchema = z.object({
         wisdom: z.number().min(1).max(100),
         charisma: z.number().min(1).max(100),
     }),
+
+    // 角色成長相簿
+    album: z.array(albumPhotoSchema).max(20).optional(),
 });
 
 // TypeScript 型別 （自動從 Schema 生成）
 export type Character = z.infer<typeof characterSchema>;
+export type AlbumPhoto = z.infer<typeof albumPhotoSchema>;
