@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { useDropzone } from "react-dropzone";
+import { useCallback, useEffect, useRef } from "react";
+import { useDropzone, FileRejection } from "react-dropzone";
 import { AlbumPhoto } from "@/lib/types";
 import { PhotoCard } from "@/components/photo-card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Upload, Loader2, ImagePlus } from "lucide-react";
-import { validateFiles, FILE_CONSTRAINTS } from "@/lib/validations/file-validation";
+import { Upload, ImagePlus } from "lucide-react";
+import { v4 as uuidv4 } from "uuid";
+import { FILE_CONSTRAINTS } from "@/lib/validations/file-validation";
 
 interface AlbumUploaderProps {
     photos: AlbumPhoto[];
@@ -16,99 +15,203 @@ interface AlbumUploaderProps {
 }
 
 export function AlbumUploader({ photos, onChange }: AlbumUploaderProps) {
-    const [isUploading, setIsUploading] = useState(false);
-    const [uploadProgress, setUploadProgress] = useState<string>("");
-    const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
+    // 使用 ref 追蹤最新的 photos
+    const photosRef = useRef(photos);
 
-    // 處理檔案上傳
-    const handleUpload = async (files: File[]) => {
-        // 驗證檔案
-        const { valid, errors } = validateFiles(files);
+    useEffect(() => {
+        photosRef.current = photos;
+    }, [photos]);
 
-        if (errors.length > 0) {
-            alert(errors.map(e => `${e.file.name}: ${e.error}`).join('\n'));
-            return;
-        }
-
-        if (valid.length === 0) return;
-
-        setIsUploading(true);
-        setUploadProgress(`Uploading... 0/${valid.length}`);
+    // Upload single file
+    const uploadFile = useCallback(async (file: File, photoId: string) => {
+        onChange(
+            photosRef.current.map((p) =>
+                p.id === photoId ? { ...p, uploading: true } : p
+            )
+        );
 
         try {
-            const formData = new FormData();
-            valid.forEach(file => {
-                formData.append("files", file);
-            });
-
-            const response = await fetch("/api/upload", {
+            const presignedResponse = await fetch("/api/s3/upload", {
                 method: "POST",
-                body: formData,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    filename: file.name,
+                    contentType: file.type,
+                    size: file.size,
+                }),
             });
 
-            const data = await response.json();
-
-            if (data.success && data.uploads) {
-                // 將上傳的檔案加入相簿
-                const newPhotos: AlbumPhoto[] = data.uploads.map((upload: any) => ({
-                    ...upload,
-                    uploadedAt: new Date(upload.uploadedAt),
-                }));
-
-                onChange([...photos, ...newPhotos]);
-                setUploadProgress(`Successfully uploaded ${newPhotos.length} photos!`);
-                
-                setTimeout(() => setUploadProgress(""), 2000);
-            } else {
-                throw new Error(data.error || "Upload failed");
+            if (!presignedResponse.ok) {
+                throw new Error("Failed to get presigned URL");
             }
-        } catch (error) {
-            alert("Upload failed, please try again later.");
-        } finally {
-            setIsUploading(false);
-        }
-    };
 
-    // 處理刪除照片
+            const { presignedUrl, key } = await presignedResponse.json();
+
+            await new Promise<void>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+
+                xhr.upload.onprogress = (event) => {
+                    if (event.lengthComputable) {
+                        const percentComplete = Math.round(
+                            (event.loaded / event.total) * 100
+                        );
+                        onChange(
+                            photosRef.current.map((p) =>
+                                p.id === photoId
+                                    ? { ...p, progress: percentComplete, key }
+                                    : p
+                            )
+                        );
+                    }
+                };
+
+                xhr.onload = () => {
+                    if (xhr.status === 200 || xhr.status === 204) {
+                        onChange(
+                            photosRef.current.map((p) =>
+                                p.id === photoId
+                                    ? {
+                                          ...p,
+                                          progress: 100,
+                                          uploading: false,
+                                          error: false,
+                                          key,
+                                      }
+                                    : p
+                            )
+                        );
+                        resolve();
+                    } else {
+                        reject(new Error(`Upload failed with status: ${xhr.status}`));
+                    }
+                };
+
+                xhr.onerror = () => reject(new Error("Upload failed"));
+
+                xhr.open("PUT", presignedUrl);
+                xhr.setRequestHeader("Content-Type", file.type);
+                xhr.send(file);
+            });
+        } catch (error) {
+            console.error("Upload error:", error);
+            onChange(
+                photosRef.current.map((p) =>
+                    p.id === photoId
+                        ? { ...p, uploading: false, progress: 0, error: true }
+                        : p
+                )
+            );
+            alert("Upload failed, please try again.");
+        }
+    }, [onChange]);
+
     const handleDelete = async (photoId: string) => {
-        const photo = photos.find(p => p.id === photoId);
+        const photo = photos.find((p) => p.id === photoId);
         if (!photo) return;
 
         if (!confirm("Are you sure you want to delete this photo?")) return;
 
-        setDeletingPhotoId(photoId);
+        if (photo.objectUrl) {
+            URL.revokeObjectURL(photo.objectUrl);
+        }
+
+        onChange(
+            photos.map((p) =>
+                p.id === photoId ? { ...p, uploading: true } : p
+            )
+        );
 
         try {
-            const response = await fetch(
-                `/api/delete?url=${encodeURIComponent(photo.url)}`,
-                { method: "DELETE" }
-            );
+            const response = await fetch("/api/s3/delete", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: photo.key }),
+            });
 
-            if (response.ok) {
-                onChange(photos.filter(p => p.id !== photoId));
-            } else {
-                throw new Error("Delete failed");
-            }
+            if (!response.ok) throw new Error("Delete failed");
+
+            onChange(photos.filter((p) => p.id !== photoId));
         } catch (error) {
+            console.error("Delete error:", error);
             alert("Delete failed, please try again later.");
-        } finally {
-            setDeletingPhotoId(null);
+            onChange(
+                photos.map((p) =>
+                    p.id === photoId ? { ...p, uploading: false, error: true } : p
+                )
+            );
         }
     };
 
-    // Dropzone 設定
-    const onDrop = useCallback((acceptedFiles: File[]) => {
-        handleUpload(acceptedFiles);
-    }, [photos]);
+    const onDrop = useCallback(
+        (acceptedFiles: File[]) => {
+            if (acceptedFiles.length) {
+                const newPhotos: AlbumPhoto[] = acceptedFiles.map((file) => ({
+                    id: uuidv4(),
+                    key: "",
+                    fileName: file.name,
+                    fileSize: file.size,
+                    fileType: file.type,
+                    objectUrl: URL.createObjectURL(file),
+                    uploading: false,
+                    progress: 0,
+                    error: false,
+                }));
+
+                const updatedPhotos = [...photosRef.current, ...newPhotos];
+
+                // 立即更新 ref，避免 uploadFile 使用舊的值
+                photosRef.current = updatedPhotos;
+                onChange(updatedPhotos);
+
+                // 開始上傳
+                newPhotos.forEach((photo, index) => {
+                    uploadFile(acceptedFiles[index], photo.id);
+                });
+            }
+        },
+        [onChange, uploadFile]
+    );
+
+    const rejectedFiles = useCallback((fileRejections: FileRejection[]) => {
+        if (fileRejections.length) {
+            const tooManyFiles = fileRejections.find(
+                (rejection) => rejection.errors[0].code === "too-many-files"
+            );
+
+            const fileSizeTooBig = fileRejections.find(
+                (rejection) => rejection.errors[0].code === "file-too-large"
+            );
+
+            if (tooManyFiles) {
+                alert(`Too many files selected, max is ${FILE_CONSTRAINTS.maxFiles}`);
+            }
+
+            if (fileSizeTooBig) {
+                alert("File size exceeds 10MB limit");
+            }
+        }
+    }, []);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        accept: {
-            'image/*': ['.jpeg', '.jpg', '.png', '.webp', '.gif']
-        },
+        onDropRejected: rejectedFiles,
         maxFiles: FILE_CONSTRAINTS.maxFiles,
-        disabled: isUploading,
+        maxSize: 10 * 1024 * 1024,
+        accept: {
+            "image/*": [".jpeg", ".jpg", ".png", ".webp", ".gif"],
+        },
     });
+
+    // 只在元件卸載時清理 objectUrl
+    useEffect(() => {
+        return () => {
+            photosRef.current.forEach((photo) => {
+                if (photo.objectUrl) {
+                    URL.revokeObjectURL(photo.objectUrl);
+                }
+            });
+        };
+    }, []); // 空依賴陣列，只在卸載時執行
 
     return (
         <Card>
@@ -124,36 +227,27 @@ export function AlbumUploader({ photos, onChange }: AlbumUploaderProps) {
                 </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-                {/* Upload Area */}
                 <div
                     {...getRootProps()}
                     className={`
                         border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
                         transition-colors
                         ${isDragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'}
-                        ${isUploading ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary hover:bg-primary/5'}
+                        hover:border-primary hover:bg-primary/5
                     `}
                 >
                     <input {...getInputProps()} />
                     <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                    {isUploading ? (
-                        <div className="space-y-2">
-                            <Loader2 className="h-6 w-6 mx-auto animate-spin" />
-                            <p className="text-sm text-muted-foreground">{uploadProgress}</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-2">
-                            <p className="text-sm font-medium">
-                                {isDragActive ? 'Release to upload' : 'Drag and drop images here, or click to select files'}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                                Supports JPG, PNG, WebP, GIF (up to 5MB)
-                            </p>
-                        </div>
-                    )}
+                    <div className="space-y-2">
+                        <p className="text-sm font-medium">
+                            {isDragActive ? 'Release to upload' : 'Drag and drop images here, or click to select files'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            Supports JPG, PNG, WebP, GIF (up to 10MB)
+                        </p>
+                    </div>
                 </div>
 
-                {/* photo grid */}
                 {photos.length > 0 && (
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                         {photos.map(photo => (
@@ -161,7 +255,7 @@ export function AlbumUploader({ photos, onChange }: AlbumUploaderProps) {
                                 key={photo.id}
                                 photo={photo}
                                 onDelete={handleDelete}
-                                isDeleting={deletingPhotoId === photo.id}
+                                isDeleting={photo.uploading}
                             />
                         ))}
                     </div>
@@ -170,4 +264,3 @@ export function AlbumUploader({ photos, onChange }: AlbumUploaderProps) {
         </Card>
     );
 }
-

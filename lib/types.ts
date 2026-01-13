@@ -19,11 +19,14 @@ export const attributeNames = {
 // 定義相簿照片資料結構
 export const albumPhotoSchema = z.object({
     id: z.string(),
-    url: z.string(),
+    key: z.string(), // S3 key
     fileName: z.string(),
     fileSize: z.number(),
     fileType: z.string(),
-    uploadedAt: z.date(),
+    objectUrl: z.string().optional(), // 本地預覽 URL
+    uploading: z.boolean().optional(),
+    progress: z.number().optional(),
+    error: z.boolean().optional(),
 });
 
 // 定義角色資料結構和驗證規則
@@ -36,12 +39,12 @@ export const characterSchema = z.object({
 
     // 種族：需從定義的選項中選擇
     race: z.enum(races, {
-        required_error: "Please select a race",
+        message: "Please select a race",
     }),
 
     // 職業：需從定義的選項中選擇
     profession: z.enum(professions, {
-        required_error: "Please select a profession",
+        message: "Please select a profession",
     }),
 
     // 屬性：每個屬性在 1 到 100 之間

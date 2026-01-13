@@ -14,34 +14,37 @@ interface PhotoCardProps {
 }
 
 export function PhotoCard({ photo, onDelete, isDeleting = false }: PhotoCardProps) {
-    const [imageUrl, setImageUrl] = useState<string>("");
-    const [isLoading, setIsLoading] = useState(true);
+    const [s3Url, setS3Url] = useState<string>("");
+    const [isLoadingS3, setIsLoadingS3] = useState(false);
 
+    // 如果有 objectUrl（本地預覽），直接使用
+    // 否則從 S3 key 產生 presigned URL
     useEffect(() => {
-        async function loadImage() {
-            // 如果是 s3:// 開頭，需要產生 presigned URL
-            if (photo.url.startsWith("s3://")) {
-                try {
-                    const response = await fetch("/api/presigned-url", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ s3Url: photo.url }),
-                    });
-                    const data = await response.json();
-                    if (data.success) {
-                        setImageUrl(data.url);
-                    }
-                } catch (error) {
-                    console.error("Failed to load image:", error);
+        async function loadS3Image() {
+            if (photo.objectUrl || !photo.key) return;
+
+            setIsLoadingS3(true);
+            try {
+                const response = await fetch("/api/presigned-url", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ s3Url: `s3://${process.env.NEXT_PUBLIC_S3_BUCKET || ""}/${photo.key}` }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    setS3Url(data.url);
                 }
-            } else {
-                // 如果是 https:// 開頭，直接使用
-                setImageUrl(photo.url);
+            } catch (error) {
+                console.error("Failed to load image:", error);
+            } finally {
+                setIsLoadingS3(false);
             }
-            setIsLoading(false);
         }
-        loadImage();
-    }, [photo.url]);
+        loadS3Image();
+    }, [photo.key, photo.objectUrl]);
+
+    const displayUrl = photo.objectUrl || s3Url;
+    const isLoading = photo.uploading || isLoadingS3;
 
     return (
         <Card className="group relative overflow-hidden hover:shadow-lg transition-shadow">
@@ -51,16 +54,29 @@ export function PhotoCard({ photo, onDelete, isDeleting = false }: PhotoCardProp
                     {isLoading ? (
                         <div className="w-full h-full flex items-center justify-center">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                            {photo.progress !== undefined && photo.progress > 0 && (
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                    <div className="text-white font-medium text-lg">
+                                        {photo.progress}%
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                    ) : imageUrl ? (
+                    ) : displayUrl ? (
                         <img
-                            src={imageUrl}
+                            src={displayUrl}
                             alt={photo.fileName}
                             className="w-full h-full object-cover transition-transform group-hover:scale-105"
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400">
                             Unable to load image
+                        </div>
+                    )}
+
+                    {photo.error && (
+                        <div className="absolute inset-0 bg-red-500/50 flex items-center justify-center">
+                            <div className="text-white font-medium">Error</div>
                         </div>
                     )}
 
