@@ -25,7 +25,7 @@ export function PhotoCard({ photo, onDelete, isDeleting = false }: PhotoCardProp
 
             setIsLoadingS3(true);
             try {
-                const response = await fetch("/api/presigned-url", {
+                const response = await fetch("/api/s3/presigned-url", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ s3Url: `s3://${process.env.NEXT_PUBLIC_S3_BUCKET || ""}/${photo.key}` }),
